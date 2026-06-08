@@ -1,0 +1,16 @@
+{
+  "excluded": ["round up", "cashback", "rewards"],
+  "income_categories": ["Salary", "Freelance"],
+  "rules": {
+    "Groceries": ["tesco", "sainsbury", "lidl", "asda", "waitrose", "aldi", "morrisons", "co-op", "whole foods", "trader joe"],
+    "Eating Out": ["mcdonald", "subway", "starbucks", "costa", "pret", "nando", "wagamama", "pizza hut", "domino", "kfc", "chipotle", "five guys", "greggs", "uber eats", "deliveroo", "just eat"],
+    "Going Out": ["cash withdrawal", "atm"],
+    "Transport": ["tfl", "trainline", "national rail", "uber", "lyft", "lime", "bolt", "shell", "bp", "esso", "texaco"],
+    "Subscriptions": ["netflix", "spotify", "apple", "google", "amazon prime", "disney", "youtube", "openai", "github"],
+    "Shopping": ["amazon", "ebay", "asos", "zara", "h&m", "ikea", "argos", "next", "primark"],
+    "Health": ["boots", "superdrug", "lloyds pharmacy", "gym", "fitbit"],
+    "Household": ["b&q", "homebase", "dunelm", "screwfix"],
+    "Salary": ["payroll", "salary", "wages"],
+    "Freelance": ["invoice", "payment received"]
+  }
+}
