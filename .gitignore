@@ -19,6 +19,7 @@ backend/__pycache__/
 backend/**/__pycache__/
 **/*.pyc
 backend/finance.db
+backend/chroma_db/
 backend/.env
 backend/*.pdf
 
