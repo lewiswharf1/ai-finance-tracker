@@ -33,3 +33,9 @@ backend/*.pdf
 *.njsproj
 *.sln
 *.sw?
+
+# Generated locally by make-app.command (hard-codes absolute paths)
+Finance Tracker.app/
+
+# Local working notes — machine-specific paths, not for publication
+HANDOFF.md

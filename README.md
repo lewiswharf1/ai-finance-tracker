@@ -26,6 +26,36 @@ A personal finance tracker that ingests bank statement PDFs, categorises transac
 - Node.js 18+
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
+## Running it
+
+Double-click **`run.command`** in Finder (or run `./run.command`). It builds the
+frontend if it has changed, serves the whole app from FastAPI on
+`http://localhost:8000`, and opens your browser. Close the Terminal window to stop it.
+
+The first run creates the Python virtualenv and installs dependencies, so it takes
+a minute; after that it starts in a couple of seconds. You still need `backend/.env`
+and `backend/rules.json` in place — see [Setup](#setup) below.
+
+For frontend development, `npm run dev` on port 5173 still works as before, talking
+to the backend on port 8000.
+
+### Putting it in the Dock
+
+Run **`./make-app.command`** once to build `Finance Tracker.app`, then drag that to
+your Dock — or into `/Applications` to get it in Launchpad and Spotlight. It opens
+`run.command` in Terminal, so you get the live log output and can stop the server with
+Ctrl-C, or by closing the window.
+
+Closing the *browser* window does not stop the server — use Ctrl-C in the Terminal
+window for that.
+
+The bundle hard-codes the path to this project, so re-run `make-app.command` if you
+ever move or rename the folder, then re-copy it to `/Applications`.
+
+**Keep the project out of `~/Documents`, `~/Desktop` and `~/Downloads`.** macOS protects
+those, and an unsigned app bundle is refused permission to execute anything inside them —
+it fails silently, so the app appears to do nothing at all.
+
 ## Setup
 
 ### 1. Clone the repo
