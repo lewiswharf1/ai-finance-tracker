@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback } from "react"
+import { Link } from "react-router-dom"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import {
   Select,
@@ -7,16 +8,13 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Skeleton } from "@/components/ui/skeleton"
 import UploadButton from "@/components/UploadButton"
+import SpendingMatrix from "@/components/SpendingMatrix"
+import TransactionsTable from "@/components/TransactionsTable"
+import SpendChart from "@/components/charts/SpendChart"
+import CategoryBars from "@/components/charts/CategoryBars"
+import { RAMP, OTHER, assignColours, gbp } from "@/lib/palette"
 import client from "@/api/client"
 
 const MONTH_NAMES = [
@@ -24,232 +22,326 @@ const MONTH_NAMES = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ]
 
-const YEARS = [2024, 2025, 2026]
+const MONTH_FULL = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+]
 
-function fmt(value) {
-  if (!value) return "—"
-  return `£${value.toFixed(2)}`
+// Anything past the last ramp step folds in here rather than inventing a colour
+const OTHER_LABEL = "Other"
+
+const EMPTY_SUMMARY = {
+  spent: 0,
+  income: 0,
+  previous: { month: 0, year: 0, spent: 0 },
+  categories: [],
+  uncategorised_spend: 0,
+  counts: { transactions: 0, excluded: 0, uncategorised: 0 },
 }
 
-function TableSkeleton({ rows = 5, cols = 8 }) {
-  return (
-    <div className="space-y-2 mt-4">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="flex gap-3">
-          {Array.from({ length: cols }).map((_, j) => (
-            <Skeleton key={j} className="h-8 flex-1" />
-          ))}
+/**
+ * The verdict: what this month cost, whether that is more or less than last
+ * month, and where most of it went. Everything else on the page is detail.
+ */
+function Verdict({ summary, year, month, loading }) {
+  if (loading) {
+    return (
+      <div className="grid gap-8 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end mb-8">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-12 w-48" />
         </div>
-      ))}
-    </div>
-  )
-}
-
-function SpendingTable({ rowKey, rowLabel, rows, categories, data, loading, incomeCategories = [] }) {
-  if (loading) return <TableSkeleton />
-
-  const incomeSet = new Set(incomeCategories)
-
-  const lookup = {}
-  for (const d of data) {
-    lookup[`${d[rowKey]}__${d.category}`] = d.total
-  }
-
-  const totals = {}
-  for (const cat of categories) {
-    totals[cat] = rows.reduce((sum, r) => sum + (lookup[`${r}__${cat}`] ?? 0), 0)
-  }
-
-  return (
-    <div className="overflow-x-auto rounded-md border border-border mt-4">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-24 text-xs font-medium text-muted-foreground">
-              {rowLabel}
-            </TableHead>
-            {categories.map((cat) => (
-              <TableHead
-                key={cat}
-                className={`text-xs font-medium text-right ${incomeSet.has(cat) ? "text-emerald-600" : "text-muted-foreground"}`}
-              >
-                {cat}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row}>
-              <TableCell className="text-sm text-muted-foreground font-medium">
-                {rowLabel === "Month" ? MONTH_NAMES[row - 1] : `Wk ${row}`}
-              </TableCell>
-              {categories.map((cat) => {
-                const val = lookup[`${row}__${cat}`]
-                return (
-                  <TableCell
-                    key={cat}
-                    className={`text-sm text-right tabular-nums ${val && incomeSet.has(cat) ? "text-emerald-600" : ""}`}
-                  >
-                    {fmt(val)}
-                  </TableCell>
-                )
-              })}
-            </TableRow>
-          ))}
-          <TableRow className="border-t-2 border-border bg-muted/30">
-            <TableCell className="text-xs font-semibold text-muted-foreground">Total</TableCell>
-            {categories.map((cat) => (
-              <TableCell
-                key={cat}
-                className={`text-sm font-semibold text-right tabular-nums ${incomeSet.has(cat) ? "text-emerald-600" : ""}`}
-              >
-                {fmt(totals[cat])}
-              </TableCell>
-            ))}
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-function TransactionsTable({ year, month, loading: parentLoading, refreshKey }) {
-  const [txns, setTxns] = useState([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pages, setPages] = useState(1)
-  const [loading, setLoading] = useState(true)
-
-  const fetchTxns = useCallback(async () => {
-    setLoading(true)
-    try {
-      const { data } = await client.get("/transactions/list", {
-        params: { year, month, page, page_size: 50 },
-      })
-      setTxns(data.transactions)
-      setTotal(data.total)
-      setPages(data.pages)
-    } finally {
-      setLoading(false)
-    }
-  }, [year, month, page, refreshKey])
-
-  useEffect(() => { setPage(1) }, [year, month])
-  useEffect(() => { fetchTxns() }, [fetchTxns])
-
-  if (loading || parentLoading) return <TableSkeleton rows={8} cols={4} />
-
-  return (
-    <div className="mt-4 space-y-3">
-      <div className="overflow-x-auto rounded-md border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs font-medium text-muted-foreground">Date</TableHead>
-              <TableHead className="text-xs font-medium text-muted-foreground">Merchant</TableHead>
-              <TableHead className="text-xs font-medium text-muted-foreground text-right">Amount</TableHead>
-              <TableHead className="text-xs font-medium text-muted-foreground">Direction</TableHead>
-              <TableHead className="text-xs font-medium text-muted-foreground">Category</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {txns.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">
-                  No transactions found
-                </TableCell>
-              </TableRow>
-            ) : (
-              txns.map((tx) => (
-                <TableRow key={tx.id}>
-                  <TableCell className="text-sm text-muted-foreground tabular-nums">{tx.date}</TableCell>
-                  <TableCell className="text-sm">{tx.merchant}</TableCell>
-                  <TableCell className="text-sm text-right tabular-nums font-medium">
-                    £{Math.abs(tx.amount).toFixed(2)}
-                  </TableCell>
-                  <TableCell>
-                    <span className={`text-xs font-medium ${tx.amount < 0 ? "text-muted-foreground" : "text-emerald-600"}`}>
-                      {tx.amount < 0 ? "out" : "in"}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{tx.category || "—"}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+        <Skeleton className="h-12 w-64" />
       </div>
+    )
+  }
 
-      {pages > 1 && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{total} transactions</span>
-          <div className="flex items-center gap-3">
-            <button
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="hover:text-foreground disabled:opacity-40 transition-colors"
-            >
-              Previous
-            </button>
-            <span>Page {page} of {pages}</span>
-            <button
-              disabled={page === pages}
-              onClick={() => setPage((p) => p + 1)}
-              className="hover:text-foreground disabled:opacity-40 transition-colors"
-            >
-              Next
-            </button>
+  const { spent, income, previous, categories, counts } = summary
+  const top = categories[0]
+  const delta = spent - previous.spent
+  // A month with nothing in it hasn't "spent 100% less" — it has no answer to give
+  const hasData = counts.transactions > 0
+  const hasPrevious = hasData && previous.spent > 0
+  const share = hasPrevious ? Math.round(Math.abs(delta / previous.spent) * 100) : 0
+  const down = delta < 0
+
+  if (!hasData) {
+    return (
+      <div className="mb-8">
+        <p className="text-sm text-muted-foreground">
+          {MONTH_FULL[month - 1]} {year}
+        </p>
+        <p className="mt-2 text-2xl font-medium tracking-tight text-muted-foreground">
+          No transactions
+        </p>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          Import a statement for this month, or pick another period above.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-8">
+      <div className="grid gap-x-10 gap-y-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {MONTH_FULL[month - 1]} {year}
+          </p>
+          <p className="mt-1 text-5xl font-semibold tracking-tight text-foreground">
+            {gbp(spent)}
+          </p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            spent
+            {income > 0 && (
+              <>
+                {" · "}
+                <span className="text-emerald-600 tabular-nums">{gbp(income)}</span> in
+              </>
+            )}
+          </p>
+        </div>
+
+        <div className="flex gap-10">
+          <div>
+            <p className="text-xs text-muted-foreground">
+              vs {MONTH_NAMES[previous.month - 1]}
+            </p>
+            {hasPrevious ? (
+              <>
+                {/* The arrow carries the direction; colour only reinforces it */}
+                <p
+                  className={`mt-1 text-lg font-medium tabular-nums ${down ? "text-emerald-600" : "text-foreground"}`}
+                >
+                  {down ? "↓" : "↑"} {gbp(delta)}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {share}% {down ? "less" : "more"}
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">No data</p>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs text-muted-foreground">Largest</p>
+            {top ? (
+              <>
+                <p className="mt-1 text-lg font-medium text-foreground">{top.category}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                  {gbp(top.total)} · {spent > 0 ? Math.round((top.total / spent) * 100) : 0}%
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">—</p>
+            )}
           </div>
         </div>
+      </div>
+
+      {counts.uncategorised > 0 && (
+        // The amount matters as much as the count: it is money the headline above
+        // does not yet include, so the figure is understated until these are filed.
+        <p className="mt-5 text-xs text-muted-foreground">
+          {counts.uncategorised} transaction{counts.uncategorised === 1 ? "" : "s"}
+          {summary.uncategorised_spend > 0 && ` worth ${gbp(summary.uncategorised_spend)}`}
+          {" "}not counted above —{" "}
+          <Link to="/review" className="underline underline-offset-2 hover:text-foreground">
+            review them
+          </Link>
+        </p>
       )}
     </div>
   )
 }
 
-export default function Dashboard() {
-  const now = new Date()
-  const [year, setYear] = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth() + 1)
-  const [refreshKey, setRefreshKey] = useState(0)
+function ChartPanel({ chart, colours, breakdown, total, caption }) {
+  return (
+    <div className="space-y-8">
+      <div>
+        <p className="mb-3 text-sm font-medium text-muted-foreground">{caption}</p>
+        <SpendChart {...chart} colours={colours} />
+      </div>
+      <div>
+        <p className="mb-4 text-sm font-medium text-muted-foreground">By category</p>
+        <CategoryBars categories={breakdown} colours={colours} total={total} />
+      </div>
+    </div>
+  )
+}
 
+export default function Dashboard() {
+  // Both start empty and are filled from /periods, so the page opens on real data
+  const [period, setPeriod] = useState(null)
+  const [years, setYears] = useState([])
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [asTable, setAsTable] = useState(false)
+  const [tab, setTab] = useState("weekly")
+
+  const [summary, setSummary] = useState(EMPTY_SUMMARY)
   const [weekly, setWeekly] = useState({ weeks: [], categories: [], data: [], income_categories: [] })
   const [monthly, setMonthly] = useState({ months: [], categories: [], data: [], income_categories: [] })
-  const [weeklyLoading, setWeeklyLoading] = useState(true)
-  const [monthlyLoading, setMonthlyLoading] = useState(true)
+  const [allCategories, setAllCategories] = useState([])
+  const [loading, setLoading] = useState(true)
 
-  const fetchWeekly = useCallback(async () => {
-    setWeeklyLoading(true)
+  const year = period?.year
+  const month = period?.month
+
+  /** Land on the newest month on file; fall back to today when nothing is imported. */
+  const fetchPeriods = useCallback(async (jump) => {
+    const now = new Date()
+    const fallback = { year: now.getFullYear(), month: now.getMonth() + 1 }
     try {
-      const { data } = await client.get("/transactions/weekly", {
-        params: { year, month },
-      })
-      setWeekly(data)
-    } finally {
-      setWeeklyLoading(false)
+      const { data } = await client.get("/transactions/periods")
+      setYears(data.years.length ? data.years : [fallback.year])
+      if (jump) setPeriod(data.latest ?? fallback)
+    } catch {
+      setYears([fallback.year])
+      if (jump) setPeriod(fallback)
     }
-  }, [year, month])
+  }, [])
 
-  const fetchMonthly = useCallback(async () => {
-    setMonthlyLoading(true)
+  const fetchMonthScoped = useCallback(async () => {
+    if (!year) return
+    setLoading(true)
     try {
-      const { data } = await client.get("/transactions/monthly", {
-        params: { year },
-      })
-      setMonthly(data)
+      const [summaryRes, weeklyRes] = await Promise.all([
+        client.get("/transactions/summary", { params: { year, month } }),
+        client.get("/transactions/weekly", { params: { year, month } }),
+      ])
+      setSummary(summaryRes.data)
+      setWeekly(weeklyRes.data)
     } finally {
-      setMonthlyLoading(false)
+      setLoading(false)
     }
-  }, [year])
+  }, [year, month, refreshKey])
 
-  useEffect(() => { fetchWeekly() }, [fetchWeekly])
-  useEffect(() => { fetchMonthly() }, [fetchMonthly])
+  const fetchYearScoped = useCallback(async () => {
+    if (!year) return
+    const { data } = await client.get("/transactions/monthly", { params: { year } })
+    setMonthly(data)
+  }, [year, refreshKey])
+
+  // The category list for inline editing — rules.json is the only source of truth
+  const fetchCategories = useCallback(async () => {
+    const { data } = await client.get("/api/rules")
+    setAllCategories(data.categories)
+  }, [refreshKey])
+
+  useEffect(() => { fetchPeriods(true) }, [fetchPeriods])
+  useEffect(() => { fetchMonthScoped() }, [fetchMonthScoped])
+  useEffect(() => { fetchYearScoped() }, [fetchYearScoped])
+  useEffect(() => { fetchCategories() }, [fetchCategories])
+
+  const incomeCategories = weekly.income_categories.length
+    ? weekly.income_categories
+    : monthly.income_categories
+
+  /**
+   * One colour assignment for the whole page, ordered by the selected month's
+   * spend and extended with anything that only appears elsewhere in the year.
+   * Switching tabs or toggling the table never repaints a category.
+   */
+  const { colours, order } = useMemo(() => {
+    const income = new Set(incomeCategories)
+    const ordered = summary.categories.map((c) => c.category)
+
+    const yearTotals = {}
+    for (const d of monthly.data) {
+      if (income.has(d.category)) continue
+      yearTotals[d.category] = (yearTotals[d.category] ?? 0) + d.total
+    }
+    for (const category of Object.keys(yearTotals).sort((a, b) => yearTotals[b] - yearTotals[a])) {
+      if (!ordered.includes(category)) ordered.push(category)
+    }
+
+    const visible = ordered.slice(0, RAMP.length)
+    return { colours: { ...assignColours(visible, incomeCategories), [OTHER_LABEL]: OTHER }, order: ordered }
+  }, [summary.categories, monthly.data, incomeCategories])
+
+  const visible = useMemo(() => new Set(order.slice(0, RAMP.length)), [order])
+
+  /** Spending rows only, with the ramp's overflow folded into one "Other" series. */
+  const prepare = useCallback(
+    (data) => {
+      const income = new Set(incomeCategories)
+      const spending = data
+        .filter((d) => !income.has(d.category))
+        .map((d) => (visible.has(d.category) ? d : { ...d, category: OTHER_LABEL }))
+
+      const present = new Set(spending.map((d) => d.category))
+      const series = [...order.filter((c) => present.has(c) && visible.has(c))]
+      if (present.has(OTHER_LABEL)) series.push(OTHER_LABEL)
+
+      return { spending, series }
+    },
+    [incomeCategories, visible, order]
+  )
+
+  const weeklyChart = useMemo(() => {
+    const { spending, series } = prepare(weekly.data)
+    return {
+      series,
+      buckets: weekly.weeks,
+      data: spending,
+      bucketKey: "week",
+      labelFor: (w) => `Wk ${w}`,
+    }
+  }, [weekly, prepare])
+
+  const { monthlyChart, yearBreakdown, yearTotal } = useMemo(() => {
+    const { spending, series } = prepare(monthly.data)
+    const breakdown = series
+      .map((category) => ({
+        category,
+        total: spending
+          .filter((d) => d.category === category)
+          .reduce((sum, d) => sum + d.total, 0),
+        // /monthly aggregates amounts, not row counts — better blank than wrong
+        count: null,
+      }))
+      .sort((a, b) => b.total - a.total)
+
+    return {
+      monthlyChart: {
+        series,
+        buckets: monthly.months,
+        data: spending,
+        bucketKey: "month",
+        labelFor: (m) => MONTH_NAMES[m - 1],
+      },
+      yearBreakdown: breakdown,
+      yearTotal: breakdown.reduce((sum, c) => sum + c.total, 0),
+    }
+  }, [monthly, prepare])
 
   function handleUploadSuccess() {
-    fetchWeekly()
-    fetchMonthly()
+    // Jump to whatever the new statement covers — that is what you came to look at
+    fetchPeriods(true)
     setRefreshKey((k) => k + 1)
   }
+
+  const toggle = (
+    <div className="flex rounded-md border border-border p-0.5">
+      {[
+        ["Chart", false],
+        ["Table", true],
+      ].map(([label, value]) => (
+        <button
+          key={label}
+          onClick={() => setAsTable(value)}
+          className={`rounded-[3px] px-2.5 py-1 text-xs transition-colors ${
+            asTable === value
+              ? "bg-secondary font-medium text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
 
   return (
     <div>
@@ -258,19 +350,25 @@ export default function Dashboard() {
         <UploadButton onSuccess={handleUploadSuccess} />
       </div>
 
-      {/* Shared selectors */}
-      <div className="flex gap-3 mb-4">
-        <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+      {/* One filter row, scoping everything below it */}
+      <div className="flex gap-3 mb-8">
+        <Select
+          value={year ? String(year) : ""}
+          onValueChange={(v) => setPeriod((p) => ({ ...p, year: Number(v) }))}
+        >
           <SelectTrigger className="w-28 h-8 text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {YEARS.map((y) => (
+            {years.map((y) => (
               <SelectItem key={y} value={String(y)}>{y}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
+        <Select
+          value={month ? String(month) : ""}
+          onValueChange={(v) => setPeriod((p) => ({ ...p, month: Number(v) }))}
+        >
           <SelectTrigger className="w-28 h-8 text-sm">
             <SelectValue />
           </SelectTrigger>
@@ -282,42 +380,65 @@ export default function Dashboard() {
         </Select>
       </div>
 
-      <Tabs defaultValue="weekly">
-        <TabsList className="h-9">
-          <TabsTrigger value="weekly" className="text-sm">Weekly</TabsTrigger>
-          <TabsTrigger value="monthly" className="text-sm">Monthly</TabsTrigger>
-          <TabsTrigger value="transactions" className="text-sm">Transactions</TabsTrigger>
-        </TabsList>
+      <Verdict summary={summary} year={year} month={month} loading={loading} />
 
-        <TabsContent value="weekly">
-          <SpendingTable
-            rowKey="week"
-            rowLabel="Week"
-            rows={weekly.weeks}
-            categories={weekly.categories}
-            data={weekly.data}
-            loading={weeklyLoading}
-            incomeCategories={weekly.income_categories}
-          />
+      <Tabs value={tab} onValueChange={setTab}>
+        <div className="flex items-center justify-between gap-3">
+          <TabsList className="h-9">
+            <TabsTrigger value="weekly" className="text-sm">Weekly</TabsTrigger>
+            <TabsTrigger value="monthly" className="text-sm">Monthly</TabsTrigger>
+            <TabsTrigger value="transactions" className="text-sm">Transactions</TabsTrigger>
+          </TabsList>
+          {tab !== "transactions" && toggle}
+        </div>
+
+        <TabsContent value="weekly" className="mt-6">
+          {asTable ? (
+            <SpendingMatrix
+              rowKey="week"
+              rowLabel="Week"
+              rows={weekly.weeks}
+              categories={weekly.categories}
+              data={weekly.data}
+              incomeCategories={weekly.income_categories}
+            />
+          ) : (
+            <ChartPanel
+              caption={`Spend by week — ${MONTH_FULL[month - 1]}`}
+              chart={weeklyChart}
+              colours={colours}
+              breakdown={summary.categories}
+              total={summary.spent}
+            />
+          )}
         </TabsContent>
 
-        <TabsContent value="monthly">
-          <SpendingTable
-            rowKey="month"
-            rowLabel="Month"
-            rows={monthly.months}
-            categories={monthly.categories}
-            data={monthly.data}
-            loading={monthlyLoading}
-            incomeCategories={monthly.income_categories}
-          />
+        <TabsContent value="monthly" className="mt-6">
+          {asTable ? (
+            <SpendingMatrix
+              rowKey="month"
+              rowLabel="Month"
+              rows={monthly.months}
+              categories={monthly.categories}
+              data={monthly.data}
+              incomeCategories={monthly.income_categories}
+            />
+          ) : (
+            <ChartPanel
+              caption={`Spend by month — ${year}`}
+              chart={monthlyChart}
+              colours={colours}
+              breakdown={yearBreakdown}
+              total={yearTotal}
+            />
+          )}
         </TabsContent>
 
         <TabsContent value="transactions">
           <TransactionsTable
             year={year}
             month={month}
-            loading={false}
+            categories={allCategories}
             refreshKey={refreshKey}
           />
         </TabsContent>

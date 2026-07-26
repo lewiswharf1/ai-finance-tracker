@@ -15,11 +15,24 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
 def _spending_query(db: Session, *columns):
+    """Filed, non-excluded money out.
+
+    Everything here goes through coalesce because `category` is nullable and SQL's
+    NULL comparisons are NULL, not true — a bare `!=` silently dropped unfiled rows
+    stored as NULL while counting the ones stored as "", so identical unfiled
+    transactions landed on opposite sides of the same filter.
+
+    Unfiled rows are excluded outright rather than grouped under a blank name: they
+    are not a category, and a nameless bar in the breakdown is unreadable. Their
+    total is reported separately by /summary so the review prompt can name it.
+    """
+    category = func.coalesce(Transaction.category, "")
     return (
         db.query(*columns)
         .filter(
-            Transaction.category != rules.EXCLUDED,
-            Transaction.category.notin_(rules.income_categories()),
+            category != "",
+            category != rules.EXCLUDED,
+            category.notin_(rules.income_categories()),
             Transaction.amount < 0,
         )
     )
@@ -121,6 +134,97 @@ def monthly_summary(year: int, db: Session = Depends(get_db)):
     return {"months": months, "categories": categories, "data": data, "income_categories": rules.income_categories()}
 
 
+@router.get("/periods")
+def periods(db: Session = Depends(get_db)):
+    """Which year/month pairs actually hold transactions, newest first.
+
+    The dashboard's year list used to be a hardcoded [2024, 2025, 2026], which goes
+    stale and claims data that may not exist. `latest` also lets the dashboard open
+    on the most recent month on file rather than on today — a tracker fed by monthly
+    statements would otherwise greet you with an empty page for most of the month.
+    """
+    rows = (
+        db.query(Transaction.year, Transaction.month)
+        .filter(Transaction.year.isnot(None), Transaction.month.isnot(None))
+        .distinct()
+        .order_by(Transaction.year.desc(), Transaction.month.desc())
+        .all()
+    )
+
+    return {
+        "years": sorted({r.year for r in rows}, reverse=True),
+        "periods": [{"year": r.year, "month": r.month} for r in rows],
+        "latest": {"year": rows[0].year, "month": rows[0].month} if rows else None,
+    }
+
+
+@router.get("/summary")
+def month_summary(year: int, month: int, db: Session = Depends(get_db)):
+    """The three numbers the dashboard leads with, plus the category breakdown.
+
+    Computed here rather than derived in the browser from /monthly so that January
+    can compare against the previous December — a year-scoped response cannot.
+    Spending totals use the same filters as every other view, so the headline and
+    the matrix can never disagree.
+    """
+
+    def spent_in(y: int, m: int) -> float:
+        total = (
+            _spending_query(db, func.sum(-Transaction.amount))
+            .filter(Transaction.year == y, Transaction.month == m)
+            .scalar()
+        )
+        return round(float(total or 0), 2)
+
+    prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
+
+    category_rows = (
+        _spending_query(
+            db,
+            Transaction.category,
+            func.round(func.sum(-Transaction.amount), 2).label("total"),
+            func.count(Transaction.id).label("count"),
+        )
+        .filter(Transaction.year == year, Transaction.month == month)
+        .group_by(Transaction.category)
+        .all()
+    )
+    categories = sorted(
+        ({"category": r.category, "total": float(r.total), "count": r.count} for r in category_rows),
+        key=lambda c: -c["total"],
+    )
+
+    income = (
+        _income_query(db, func.sum(Transaction.amount))
+        .filter(Transaction.year == year, Transaction.month == month)
+        .scalar()
+    )
+
+    in_month = db.query(Transaction).filter(Transaction.year == year, Transaction.month == month)
+    pending = uncategorised_query(db).filter(Transaction.year == year, Transaction.month == month)
+
+    # Money out that no category claims yet. Kept out of `spent` — see _spending_query —
+    # so the prompt to review can say how much is still unaccounted for.
+    pending_out = (
+        pending.with_entities(func.sum(-Transaction.amount)).filter(Transaction.amount < 0).scalar()
+    )
+
+    return {
+        "year": year,
+        "month": month,
+        "spent": spent_in(year, month),
+        "income": round(float(income or 0), 2),
+        "previous": {"year": prev_year, "month": prev_month, "spent": spent_in(prev_year, prev_month)},
+        "categories": categories,
+        "uncategorised_spend": round(float(pending_out or 0), 2),
+        "counts": {
+            "transactions": in_month.count(),
+            "excluded": in_month.filter(Transaction.category == rules.EXCLUDED).count(),
+            "uncategorised": pending.count(),
+        },
+    }
+
+
 @router.get("/trends")
 def trends(db: Session = Depends(get_db)):
     rows = (
@@ -148,6 +252,7 @@ def transaction_list(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     category: Optional[str] = Query(None),
+    merchant: Optional[str] = Query(None, description="Case-insensitive substring of the payee name"),
     month: Optional[int] = Query(None),
     year: Optional[int] = Query(None),
     uncategorised: bool = Query(False, description="Only transactions awaiting review"),
@@ -155,11 +260,17 @@ def transaction_list(
 ):
     if uncategorised:
         q = uncategorised_query(db)
+    elif category:
+        # Naming a category is the user asking for exactly it — Excluded included, which
+        # is the only way those rows are visible anywhere in the app.
+        q = db.query(Transaction).filter(Transaction.category == category)
     else:
-        q = db.query(Transaction).filter(Transaction.category != rules.EXCLUDED)
+        # coalesce, not a bare !=: category is nullable, and SQL's NULL != 'Excluded'
+        # is NULL, which would quietly drop every row still awaiting review.
+        q = db.query(Transaction).filter(func.coalesce(Transaction.category, "") != rules.EXCLUDED)
 
-    if category:
-        q = q.filter(Transaction.category == category)
+    if merchant:
+        q = q.filter(Transaction.merchant.ilike(f"%{merchant}%"))
     if month:
         q = q.filter(Transaction.month == month)
     if year:

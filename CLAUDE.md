@@ -50,6 +50,12 @@ Current set (user-defined, will change): `One off` · `Rent` · `Groceries` · `
   both show it live, so a too-broad keyword is visible before it is saved
 - **Rules API is namespaced under `/api`** because the SPA and the API share one origin —
   an unprefixed `GET /rules` would shadow the `/rules` page on a hard refresh
+- **`category` is nullable, so never compare it with a bare `!=`.** SQL evaluates
+  `NULL != 'Excluded'` as NULL, not true, which silently drops every unfiled row from the
+  result. Always `func.coalesce(Transaction.category, "")` first
+- **Unfiled rows are not spending.** `_spending_query` excludes empty categories entirely
+  rather than grouping them under a blank name; `/transactions/summary` reports their
+  total as `uncategorised_spend` so the UI can say what the headline leaves out
 - **Chat** uses GPT-4o tool calling over the SQL query functions in `backend/services/tools.py` — there is no vector store or RAG; `search_transactions` is a substring match on merchant
 - **Backend docs** available at `localhost:8000/docs`
 - `OPENAI_API_KEY` lives in `backend/.env` — never commit this file
@@ -62,3 +68,8 @@ Current set (user-defined, will change): `One off` · `Rent` · `Groceries` · `
 - **Neutral colour palette** with a single restrained accent colour
 - The UI should look like a developer who cares about design built it — no gradients for the sake of it, no oversized hero text, no AI-looking purple dashboards
 - **Charts** via Recharts, styled to match the overall minimal aesthetic
+- **All chart colour comes from `src/lib/palette.js`** — never a hex literal in a chart.
+  It is a zinc ramp validated as an *ordinal* scale, with emerald `#059669` reserved for
+  income. Ramp position is assigned once per page from the selected month's totals and
+  shared by every chart, so a category never changes colour between tabs or views. Load
+  the **`dataviz` skill** before writing or restyling any chart
