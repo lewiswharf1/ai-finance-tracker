@@ -5,8 +5,9 @@ and deleting a category are separate endpoints because they also have to migrate
 the transactions already filed under that category.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -31,6 +32,59 @@ def _with_counts(db: Session, config: dict) -> dict:
 @router.get("")
 def get_rules(db: Session = Depends(get_db)):
     return _with_counts(db, rules.load())
+
+
+@router.get("/preview")
+def preview_keyword(
+    keyword: str = Query(..., description="Candidate keyword to test"),
+    category: str | None = Query(None, description="Category it is destined for, to flag conflicts"),
+    db: Session = Depends(get_db),
+):
+    """Which merchants a candidate keyword would claim.
+
+    Existing rows are never recategorised by a new rule, so a too-broad keyword only
+    shows up on a future import — long after the mistake is memorable. Running it
+    against the merchants already on file is the closest thing to a preview.
+    """
+    cleaned = keyword.strip().lower()
+    if not cleaned:
+        return {"keyword": "", "merchants": [], "transactions": 0, "conflicts": []}
+
+    rows = (
+        db.query(
+            Transaction.merchant,
+            Transaction.category,
+            func.count(Transaction.id).label("count"),
+        )
+        .group_by(Transaction.merchant, Transaction.category)
+        .all()
+    )
+
+    groups: dict[str, dict] = {}
+    for row in rows:
+        if not rules.matches(cleaned, row.merchant):
+            continue
+        group = groups.setdefault(row.merchant, {"merchant": row.merchant, "count": 0, "categories": []})
+        group["count"] += row.count
+        if row.category and row.category not in group["categories"]:
+            group["categories"].append(row.category)
+
+    matched = sorted(groups.values(), key=lambda g: (-g["count"], g["merchant"]))
+
+    # A merchant already filed elsewhere is the signal that matters: it means the
+    # keyword reaches past what the user had in mind.
+    conflicts = (
+        [g["merchant"] for g in matched if any(c != category for c in g["categories"])]
+        if category
+        else []
+    )
+
+    return {
+        "keyword": cleaned,
+        "merchants": matched,
+        "transactions": sum(g["count"] for g in matched),
+        "conflicts": conflicts,
+    }
 
 
 class RulesUpdate(BaseModel):

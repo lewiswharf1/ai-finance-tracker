@@ -18,24 +18,36 @@ There is no LLM in the categorisation path — it is keyword rules plus manual r
 
 ## Categories
 
-`Groceries` · `Eating Out` · `Going Out` · `Sport` · `Vending Machine` · `Transport` · `Subscriptions` · `Shopping` · `Household` · `Rent` · `Health` · `Miscellaneous` · `Parents` · `Tutoring`
+**Do not hardcode a category list anywhere.** `backend/rules.json` is the live source of
+truth: it is editable from the Rules tab, written by the review flow, and hot-reloaded on
+mtime change. Always read it through `backend/services/rules.py` — `rules.categories()`,
+`rules.income_categories()`, `rules.spending_categories()` — and never cache the result at
+import time. A category may legitimately have zero keywords.
 
-Defined by `backend/rules.json`; `Parents` and `Tutoring` are income categories. The file
-is editable from the Rules tab and hot-reloaded, so it is the live source of truth — read
-it through `backend/services/rules.py`, never cache category lists at import time.
+Current set (user-defined, will change): `One off` · `Rent` · `Groceries` · `Going Out` ·
+`Transport` · `Shopping` · `Subscriptions` · `Income`, with `Income` flagged as income.
 
 ## Key Conventions
 
 - **`Excluded`** is a reserved category meaning "not spending" — filtered out of every
   view. Read it from `rules.EXCLUDED`, never hardcode the string
-- **Import never categorises or excludes anything by itself.** Every row lands
-  uncategorised and appears in Review; only the user's own keyword rules or an explicit
-  review decision assign a category, `Excluded` included
+- **Import never categorises or excludes anything by itself.** Every row lands with an
+  empty category and appears in Review, grouped by merchant; only the user's own keyword
+  rules or an explicit review decision assign a category, `Excluded` included. The
+  statement's `transaction_type` is recorded but never acted on
 - **Amounts**: negative = money out, positive = money in (refund)
 - **Dashboard** has weekly / monthly / transactions tabs with shared year + month selectors
-- **Categorisation** is rules-only. Upload applies keyword rules; whatever is left keeps an
-  empty category and appears in the Review tab, grouped by merchant. Nothing is auto-assigned.
-- **Keyword matching is longest-match-wins**, so `rules.json` has no order dependence
+- **Keyword matching is whole-word and longest-match-wins**, so `rules.json` has no order
+  dependence and `round` cannot swallow "Ground Coffee". Always test through
+  `rules.matches(keyword, merchant)` — never write a bare `in` substring check. Excluded
+  keywords remain the exception to length: they are checked first and win regardless
+- **A review card suggests the whole merchant name** as the keyword, with the stem before
+  any ` - ` tail offered as a one-click alternative for recurring payees. Chase gives clean
+  payee names, so precision costs nothing — `rules.suggest_keywords()` does not try to
+  reduce a merchant to one token
+- **`GET /api/rules/preview?keyword=&category=`** reports which merchants already on file a
+  candidate keyword would claim and which are filed elsewhere. Review and the Rules editor
+  both show it live, so a too-broad keyword is visible before it is saved
 - **Rules API is namespaced under `/api`** because the SPA and the API share one origin —
   an unprefixed `GET /rules` would shadow the `/rules` page on a hard refresh
 - **Chat** uses GPT-4o tool calling over the SQL query functions in `backend/services/tools.py` — there is no vector store or RAG; `search_transactions` is a substring match on merchant

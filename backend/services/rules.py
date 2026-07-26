@@ -5,6 +5,7 @@ through the API (or by hand) take effect without restarting the server. Every
 write backs up the previous version and lands atomically.
 """
 
+import functools
 import json
 import os
 import re
@@ -135,50 +136,82 @@ def is_valid(category: str) -> bool:
     return category == EXCLUDED or category in categories()
 
 
+@functools.lru_cache(maxsize=512)
+def _pattern(keyword: str) -> re.Pattern:
+    """Compile a keyword into a whole-word matcher.
+
+    A bare substring test is too eager: "round" swallows "Ground Coffee" and
+    "Roundhouse", and nothing in the UI reveals a wrongly excluded row. Word
+    boundaries via lookarounds rather than \\b, so a keyword starting or ending in
+    punctuation ("m&s", "co-op") still anchors correctly.
+    """
+    prefix = r"(?<!\w)" if re.match(r"\w", keyword) else ""
+    suffix = r"(?!\w)" if re.search(r"\w$", keyword) else ""
+    return re.compile(prefix + re.escape(keyword) + suffix)
+
+
+def matches(keyword: str, merchant: str) -> bool:
+    """Whether a keyword applies to a merchant, on whole-word boundaries."""
+    cleaned = (keyword or "").strip().lower()
+    if not cleaned:
+        return False
+    return _pattern(cleaned).search((merchant or "").lower()) is not None
+
+
 def match(merchant: str) -> str | None:
     """Categorise a merchant by keyword, longest match wins.
 
     Longest-match rather than first-match means the file has no order dependence:
     "amazon music" beats "amazon" no matter which is listed first.
     """
-    lower = (merchant or "").lower()
     config = load()
 
     for keyword in config["excluded"]:
-        if keyword in lower:
+        if matches(keyword, merchant):
             return EXCLUDED
 
     best: str | None = None
     best_length = 0
     for category, keywords in config["rules"].items():
         for keyword in keywords:
-            if len(keyword) > best_length and keyword in lower:
+            if len(keyword) > best_length and matches(keyword, merchant):
                 best, best_length = category, len(keyword)
 
     return best
 
 
-# Tokens that carry no identity — locations, card noise, company suffixes
-_NOISE = {
-    "ltd", "limited", "plc", "llp", "inc", "co", "com", "uk", "gb", "gbr", "london",
-    "card", "pos", "purchase", "payment", "contactless", "the", "on", "at", "and",
-}
+# Where a merchant string stops being an identity and starts being a per-transaction
+# tail: " - Train fare" on a recurring payee, or a card/terminal number.
+_STEM_CUT = re.compile(r"\s+[-–—]\s+|\s+\d{3,}\b")
+
+
+def _clean_merchant(merchant: str) -> str:
+    return re.sub(r"\s+", " ", (merchant or "").strip().lower())
 
 
 def suggest_keyword(merchant: str) -> str:
-    """Guess a rule keyword from a raw merchant string.
+    """The whole merchant name, lowercased.
 
-    "SAINSBURYS S/MKTS 1234 LONDON" -> "sainsburys". Only ever a starting point;
-    the review UI lets the keyword be edited before it is saved.
+    Chase statements give a clean payee name rather than POS noise, so the merchant
+    itself is the most precise rule available and the safest default. Earlier versions
+    stripped it down to one or two tokens, which produced keywords far broader than
+    intended ("Round up" -> "round") and, when the tokens were not adjacent, keywords
+    that failed to match even the merchant they came from ("TFL - Transport for
+    London" -> "tfl transport").
     """
-    lower = (merchant or "").lower()
-    tokens = [t for t in re.split(r"[^a-z0-9&']+", lower) if t]
-    words = [t for t in tokens if not any(ch.isdigit() for ch in t) and t not in _NOISE and len(t) > 1]
+    return _clean_merchant(merchant)
 
-    if not words:
-        return lower.strip()
 
-    keyword = words[0]
-    if len(keyword) < 5 and len(words) > 1:
-        keyword = f"{keyword} {words[1]}"
-    return keyword
+def suggest_keywords(merchant: str) -> list[str]:
+    """Candidate keywords for one merchant, most precise first.
+
+    The stem is offered alongside the full name because a recurring payee appears
+    under a different tail each time — "From WHARF SM & KE - Train fare" and
+    "- Towards shopping" are one rule if cut at the separator, two if not.
+    """
+    full = _clean_merchant(merchant)
+    if not full:
+        return []
+
+    stem = _STEM_CUT.split(full, maxsplit=1)[0].strip()
+    return [full] if stem == full or not stem else [full, stem]

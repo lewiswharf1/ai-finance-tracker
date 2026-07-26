@@ -21,14 +21,16 @@ import {
   SelectItem,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import useKeywordPreview from "@/hooks/useKeywordPreview"
 import client from "@/api/client"
 
 // Excluded keywords live outside the category list, but are edited the same way,
 // so they get a pseudo-entry in the sidebar.
 const EXCLUDED = "__excluded__"
 
-function KeywordEditor({ keywords, onAdd, onRemove, placeholder }) {
+function KeywordEditor({ keywords, onAdd, onRemove, placeholder, category }) {
   const [draft, setDraft] = useState("")
+  const preview = useKeywordPreview(draft, category)
 
   function submit(e) {
     e.preventDefault()
@@ -70,12 +72,36 @@ function KeywordEditor({ keywords, onAdd, onRemove, placeholder }) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={placeholder}
-          className="h-9 max-w-xs font-mono text-xs"
+          className="h-9 max-w-md font-mono text-xs"
         />
         <Button type="submit" variant="outline" size="sm" disabled={!draft.trim()}>
           Add
         </Button>
       </form>
+
+      {/* What the keyword would claim, checked against the merchants already on file */}
+      {preview && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {preview.merchants.length === 0 ? (
+            "Matches no merchant on file yet."
+          ) : (
+            <>
+              Matches {preview.transactions} transaction
+              {preview.transactions === 1 ? "" : "s"} across{" "}
+              <span className="text-foreground">
+                {preview.merchants
+                  .slice(0, 4)
+                  .map((m) => m.merchant)
+                  .join(", ")}
+                {preview.merchants.length > 4 && ` +${preview.merchants.length - 4} more`}
+              </span>
+              {preview.conflicts.length > 0 && (
+                <span className="text-destructive"> — already categorised elsewhere</span>
+              )}
+            </>
+          )}
+        </p>
+      )}
     </div>
   )
 }
@@ -199,8 +225,8 @@ export default function Rules() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Rules</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Keywords are matched against the merchant name. The longest match wins, so order
-            does not matter.
+            Keywords match whole words in the merchant name — "round" will not match
+            "Roundhouse". The longest match wins, so order does not matter.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
@@ -259,6 +285,7 @@ export default function Rules() {
               </p>
               <KeywordEditor
                 keywords={config.excluded}
+                category="Excluded"
                 placeholder="round up"
                 onAdd={(keyword) => saveConfig({ excluded: [...config.excluded, keyword] })}
                 onRemove={(keyword) =>
@@ -325,6 +352,7 @@ export default function Rules() {
 
               <KeywordEditor
                 keywords={keywords}
+                category={selected}
                 placeholder="tesco"
                 onAdd={(keyword) =>
                   saveConfig({

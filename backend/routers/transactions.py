@@ -211,7 +211,9 @@ def review_queue(db: Session = Depends(get_db)):
                 "total": float(g.total or 0),
                 "first_date": g.first_date.isoformat() if g.first_date else None,
                 "last_date": g.last_date.isoformat() if g.last_date else None,
-                "suggested_keyword": rules.suggest_keyword(g.merchant),
+                # First option is the default; any others are shorter stems the user
+                # can take in one click when the tail varies per transaction.
+                "keyword_options": rules.suggest_keywords(g.merchant),
             }
             for g in groups
         ],

@@ -11,11 +11,19 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+import useKeywordPreview from "@/hooks/useKeywordPreview"
 import client from "@/api/client"
 
 // The reserved category every spending query filters out. Picking it also sends a
 // remembered keyword to the excluded list rather than to a category.
 const EXCLUDED = "Excluded"
+
+function names(merchants, limit = 3) {
+  const shown = merchants.slice(0, limit).join(", ")
+  const rest = merchants.length - limit
+  return rest > 0 ? `${shown} +${rest} more` : shown
+}
 
 function money(value) {
   const sign = value < 0 ? "" : "+"
@@ -30,10 +38,19 @@ function dateRange(first, last) {
 }
 
 function MerchantCard({ entry, categories, onResolved }) {
+  const options = entry.keyword_options ?? []
   const [category, setCategory] = useState("")
   const [addRule, setAddRule] = useState(true)
-  const [keyword, setKeyword] = useState(entry.suggested_keyword)
+  const [keyword, setKeyword] = useState(options[0] ?? "")
   const [saving, setSaving] = useState(false)
+
+  const preview = useKeywordPreview(addRule ? keyword : "", category || null)
+  const others = (preview?.merchants ?? [])
+    .filter((m) => m.merchant !== entry.merchant)
+    .map((m) => m.merchant)
+  // A keyword that misses the merchant it came from is a rule that never fires
+  const missesOwnMerchant =
+    preview && !preview.merchants.some((m) => m.merchant === entry.merchant)
 
   async function save() {
     if (!category) return
@@ -96,17 +113,6 @@ function MerchantCard({ entry, categories, onResolved }) {
           Remember
         </label>
 
-        {addRule && (
-          <Input
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && save()}
-            placeholder="keyword"
-            aria-label="Rule keyword"
-            className="h-9 w-44 font-mono text-xs"
-          />
-        )}
-
         <div className="ml-auto flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => onResolved(entry.merchant)}>
             Skip
@@ -117,14 +123,65 @@ function MerchantCard({ entry, categories, onResolved }) {
         </div>
       </div>
 
-      {addRule && category && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Future transactions containing{" "}
-          <span className="font-mono text-foreground">{keyword.trim() || "…"}</span>{" "}
-          {category === EXCLUDED
-            ? "will be excluded from spending views automatically."
-            : `will be categorised as ${category} automatically.`}
-        </p>
+      {addRule && (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+              placeholder="keyword"
+              aria-label="Rule keyword"
+              className="h-9 w-full max-w-md font-mono text-xs"
+            />
+            {options.length > 1 &&
+              options.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setKeyword(option)}
+                  className={cn(
+                    "rounded-md border px-2 py-1 font-mono text-xs transition-colors",
+                    keyword === option
+                      ? "border-foreground/30 bg-secondary text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+          </div>
+
+          {category && (
+            <p className="text-xs text-muted-foreground">
+              Future transactions containing{" "}
+              <span className="font-mono text-foreground">{keyword.trim() || "…"}</span>{" "}
+              {category === EXCLUDED
+                ? "will be excluded from spending views automatically."
+                : `will be categorised as ${category} automatically.`}
+            </p>
+          )}
+
+          {missesOwnMerchant ? (
+            <p className="text-xs text-destructive">
+              Does not match {entry.merchant} — this rule would never fire.
+            </p>
+          ) : (
+            others.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Also matches {others.length} other merchant
+                {others.length === 1 ? "" : "s"} on file:{" "}
+                <span className="text-foreground">{names(others)}</span>
+                {preview.conflicts.length > 0 && (
+                  <span className="text-destructive">
+                    {" "}
+                    — {names(preview.conflicts)} already categorised elsewhere
+                  </span>
+                )}
+              </p>
+            )
+          )}
+        </div>
       )}
     </div>
   )
