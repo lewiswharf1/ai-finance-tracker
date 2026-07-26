@@ -74,8 +74,8 @@ def create_category(new: CategoryCreate, db: Session = Depends(get_db)):
     name = new.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Category name cannot be empty")
-    if name == rules.TRANSFER:
-        raise HTTPException(status_code=400, detail=f"'{rules.TRANSFER}' is reserved")
+    if name == rules.EXCLUDED:
+        raise HTTPException(status_code=400, detail=f"'{rules.EXCLUDED}' is reserved")
 
     config = rules.load()
     if name in config["categories"]:
@@ -104,8 +104,8 @@ def rename_category(name: str, rename: CategoryRename, db: Session = Depends(get
         raise HTTPException(status_code=404, detail=f"'{name}' not found")
     if not new_name:
         raise HTTPException(status_code=400, detail="Category name cannot be empty")
-    if new_name == rules.TRANSFER:
-        raise HTTPException(status_code=400, detail=f"'{rules.TRANSFER}' is reserved")
+    if new_name == rules.EXCLUDED:
+        raise HTTPException(status_code=400, detail=f"'{rules.EXCLUDED}' is reserved")
     if new_name != name and new_name in config["categories"]:
         raise HTTPException(status_code=409, detail=f"'{new_name}' already exists")
 

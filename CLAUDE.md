@@ -26,7 +26,11 @@ it through `backend/services/rules.py`, never cache category lists at import tim
 
 ## Key Conventions
 
-- **Transfers** are excluded from all spending views
+- **`Excluded`** is a reserved category meaning "not spending" — filtered out of every
+  view. Read it from `rules.EXCLUDED`, never hardcode the string
+- **Import never categorises or excludes anything by itself.** Every row lands
+  uncategorised and appears in Review; only the user's own keyword rules or an explicit
+  review decision assign a category, `Excluded` included
 - **Amounts**: negative = money out, positive = money in (refund)
 - **Dashboard** has weekly / monthly / transactions tabs with shared year + month selectors
 - **Categorisation** is rules-only. Upload applies keyword rules; whatever is left keeps an

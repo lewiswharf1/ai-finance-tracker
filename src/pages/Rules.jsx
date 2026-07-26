@@ -23,8 +23,8 @@ import {
 import { cn } from "@/lib/utils"
 import client from "@/api/client"
 
-// Keywords that mark a transaction as a Transfer live outside the category list,
-// but are edited the same way, so they get a pseudo-entry in the sidebar.
+// Excluded keywords live outside the category list, but are edited the same way,
+// so they get a pseudo-entry in the sidebar.
 const EXCLUDED = "__excluded__"
 
 function KeywordEditor({ keywords, onAdd, onRemove, placeholder }) {
@@ -254,8 +254,8 @@ export default function Rules() {
             <>
               <h2 className="text-sm font-semibold tracking-tight">Excluded</h2>
               <p className="mt-1 mb-5 text-sm text-muted-foreground">
-                Merchants containing these keywords are marked as Transfer and left out of
-                every spending view. Checked before any category rule.
+                Merchants containing these keywords are left out of every spending view.
+                Checked before any category rule.
               </p>
               <KeywordEditor
                 keywords={config.excluded}

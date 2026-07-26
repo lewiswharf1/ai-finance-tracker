@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Transaction
-from services import rules
 from services.categoriser import categorise_all, uncategorised_query
 from services.parser import parse_statement
 
@@ -44,15 +43,16 @@ def upload_statement(file: UploadFile, db: Session = Depends(get_db)):
 
     transactions = []
     for row in rows:
-        is_transfer = "transfer" in (row["transaction_type"] or "").lower()
-
         transactions.append(
             Transaction(
                 date=row["date"],
                 merchant=row["merchant"],
                 transaction_type=row["transaction_type"],
                 amount=row["amount"],
-                category=rules.TRANSFER if is_transfer else "",
+                # Every row imports uncategorised and goes to review. Nothing is excluded
+                # on the strength of its statement type — excluding is the user's call,
+                # made in Review or by a keyword in the excluded list.
+                category="",
                 week_number=row["week_number"],
                 month=row["month"],
                 year=row["year"],

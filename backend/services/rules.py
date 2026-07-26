@@ -17,8 +17,11 @@ CONFIG_PATH = _BACKEND / "rules.json"
 EXAMPLE_PATH = _BACKEND / "rules.example.json"
 BACKUP_PATH = _BACKEND / "rules.backup.json"
 
-# Reserved: assigned by the parser and the review flow, never user-defined
-TRANSFER = "Transfer"
+# Reserved category meaning "leave this out of every spending view". Only ever assigned
+# by a user decision: chosen in the review flow, or matched by a keyword in the excluded
+# list. Import never applies it on its own, whatever the statement's transaction type.
+# Never user-defined — the rules editor refuses it as a category name.
+EXCLUDED = "Excluded"
 
 _cache: dict | None = None
 _cache_mtime: float | None = None
@@ -46,11 +49,11 @@ def _normalise(data: dict) -> dict:
     rules = {str(k): _clean_keywords(v) for k, v in (data.get("rules") or {}).items()}
 
     categories = [str(c) for c in (data.get("categories") or list(rules.keys()))]
-    categories = [c for c in dict.fromkeys(categories) if c and c != TRANSFER]
+    categories = [c for c in dict.fromkeys(categories) if c and c != EXCLUDED]
 
     # A category can exist with no keywords, but every rules key must be a category
     for category in rules:
-        if category not in categories and category != TRANSFER:
+        if category not in categories and category != EXCLUDED:
             categories.append(category)
     rules = {c: rules.get(c, []) for c in categories}
 
@@ -129,7 +132,7 @@ def spending_categories() -> list[str]:
 
 
 def is_valid(category: str) -> bool:
-    return category == TRANSFER or category in categories()
+    return category == EXCLUDED or category in categories()
 
 
 def match(merchant: str) -> str | None:
@@ -143,7 +146,7 @@ def match(merchant: str) -> str | None:
 
     for keyword in config["excluded"]:
         if keyword in lower:
-            return TRANSFER
+            return EXCLUDED
 
     best: str | None = None
     best_length = 0

@@ -145,7 +145,7 @@ def definitions() -> list[dict]:
 
 def _base(db: Session):
     return db.query(Transaction).filter(
-        Transaction.category != "Transfer",
+        Transaction.category != rules.EXCLUDED,
         Transaction.amount < 0,
     )
 
@@ -166,7 +166,7 @@ def get_spending_summary(db: Session, year: int, month: int = None) -> Result:
             Transaction.category,
             func.round(func.sum(-Transaction.amount), 2).label("total"),
         )
-        .filter(Transaction.category != "Transfer", Transaction.amount < 0)
+        .filter(Transaction.category != rules.EXCLUDED, Transaction.amount < 0)
         .filter(Transaction.year == year)
     )
     if month:
@@ -218,7 +218,7 @@ def get_top_merchants(db: Session, year: int = None, month: int = None, limit: i
             func.round(func.sum(-Transaction.amount), 2).label("total"),
             func.count(Transaction.id).label("count"),
         )
-        .filter(Transaction.category != "Transfer", Transaction.amount < 0)
+        .filter(Transaction.category != rules.EXCLUDED, Transaction.amount < 0)
     )
     if year:
         q = q.filter(Transaction.year == year)
@@ -263,7 +263,7 @@ def search_transactions(db: Session, query: str, year: int = None, month: int = 
     q = (
         db.query(Transaction)
         .filter(
-            Transaction.category != "Transfer",
+            Transaction.category != rules.EXCLUDED,
             Transaction.merchant.ilike(f"%{query}%"),
         )
     )

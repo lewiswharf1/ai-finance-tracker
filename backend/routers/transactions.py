@@ -18,7 +18,7 @@ def _spending_query(db: Session, *columns):
     return (
         db.query(*columns)
         .filter(
-            Transaction.category != rules.TRANSFER,
+            Transaction.category != rules.EXCLUDED,
             Transaction.category.notin_(rules.income_categories()),
             Transaction.amount < 0,
         )
@@ -156,7 +156,7 @@ def transaction_list(
     if uncategorised:
         q = uncategorised_query(db)
     else:
-        q = db.query(Transaction).filter(Transaction.category != rules.TRANSFER)
+        q = db.query(Transaction).filter(Transaction.category != rules.EXCLUDED)
 
     if category:
         q = q.filter(Transaction.category == category)
@@ -246,7 +246,7 @@ def resolve_merchant(decision: ReviewDecision, db: Session = Depends(get_db)):
             raise HTTPException(status_code=400, detail="Keyword cannot be empty")
 
         config = rules.load()
-        if decision.category == rules.TRANSFER:
+        if decision.category == rules.EXCLUDED:
             config["excluded"] = config["excluded"] + [keyword]
         else:
             config["rules"][decision.category] = config["rules"].get(decision.category, []) + [keyword]

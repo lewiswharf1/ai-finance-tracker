@@ -13,7 +13,9 @@ import {
 } from "@/components/ui/select"
 import client from "@/api/client"
 
-const TRANSFER = "Transfer"
+// The reserved category every spending query filters out. Picking it also sends a
+// remembered keyword to the excluded list rather than to a category.
+const EXCLUDED = "Excluded"
 
 function money(value) {
   const sign = value < 0 ? "" : "+"
@@ -46,7 +48,8 @@ function MerchantCard({ entry, categories, onResolved }) {
       const swept = data.also_matched
         ? ` and ${data.also_matched} more matching the new rule`
         : ""
-      toast.success(`${data.updated} categorised as ${category}${swept}`)
+      const outcome = category === EXCLUDED ? "excluded" : `categorised as ${category}`
+      toast.success(`${data.updated} ${outcome}${swept}`)
       onResolved(entry.merchant, data.also_matched > 0)
     } catch (err) {
       toast.error(err.response?.data?.detail ?? "Could not save")
@@ -79,7 +82,7 @@ function MerchantCard({ entry, categories, onResolved }) {
                 {c}
               </SelectItem>
             ))}
-            <SelectItem value={TRANSFER}>Transfer (exclude)</SelectItem>
+            <SelectItem value={EXCLUDED}>Exclude</SelectItem>
           </SelectContent>
         </Select>
 
@@ -117,8 +120,10 @@ function MerchantCard({ entry, categories, onResolved }) {
       {addRule && category && (
         <p className="mt-2 text-xs text-muted-foreground">
           Future transactions containing{" "}
-          <span className="font-mono text-foreground">{keyword.trim() || "…"}</span> will be
-          categorised as {category} automatically.
+          <span className="font-mono text-foreground">{keyword.trim() || "…"}</span>{" "}
+          {category === EXCLUDED
+            ? "will be excluded from spending views automatically."
+            : `will be categorised as ${category} automatically.`}
         </p>
       )}
     </div>
