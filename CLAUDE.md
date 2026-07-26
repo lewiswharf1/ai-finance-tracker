@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A personal finance tracker that ingests Chase UK PDF bank statements, categorises transactions automatically, and displays spending in weekly and monthly views with charts and a natural language chat interface.
+A personal finance tracker that ingests Chase UK PDF bank statements, categorises transactions by keyword rules with a manual review step for anything unmatched, and displays spending in weekly and monthly views with charts and a natural language chat interface.
 
 ## Stack
 
@@ -12,20 +12,28 @@ A personal finance tracker that ingests Chase UK PDF bank statements, categorise
 | Backend | Python FastAPI — `localhost:8000` |
 | Database | SQLite via SQLAlchemy |
 | LLM (chat) | OpenAI `gpt-4o` via OpenAI API |
-| LLM (categorisation) | OpenAI `gpt-4o-mini` via OpenAI API |
 | PDF parsing | pdfplumber |
+
+There is no LLM in the categorisation path — it is keyword rules plus manual review.
 
 ## Categories
 
 `Groceries` · `Eating Out` · `Going Out` · `Sport` · `Vending Machine` · `Transport` · `Subscriptions` · `Shopping` · `Household` · `Rent` · `Health` · `Miscellaneous` · `Parents` · `Tutoring`
 
-Defined by `backend/rules.json`; `Parents` and `Tutoring` are income categories.
+Defined by `backend/rules.json`; `Parents` and `Tutoring` are income categories. The file
+is editable from the Rules tab and hot-reloaded, so it is the live source of truth — read
+it through `backend/services/rules.py`, never cache category lists at import time.
 
 ## Key Conventions
 
 - **Transfers** are excluded from all spending views
 - **Amounts**: negative = money out, positive = money in (refund)
 - **Dashboard** has weekly / monthly / transactions tabs with shared year + month selectors
+- **Categorisation** is rules-only. Upload applies keyword rules; whatever is left keeps an
+  empty category and appears in the Review tab, grouped by merchant. Nothing is auto-assigned.
+- **Keyword matching is longest-match-wins**, so `rules.json` has no order dependence
+- **Rules API is namespaced under `/api`** because the SPA and the API share one origin —
+  an unprefixed `GET /rules` would shadow the `/rules` page on a hard refresh
 - **Chat** uses GPT-4o tool calling over the SQL query functions in `backend/services/tools.py` — there is no vector store or RAG; `search_transactions` is a substring match on merchant
 - **Backend docs** available at `localhost:8000/docs`
 - `OPENAI_API_KEY` lives in `backend/.env` — never commit this file

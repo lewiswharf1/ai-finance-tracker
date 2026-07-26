@@ -8,7 +8,8 @@ from fastapi.staticfiles import StaticFiles
 
 from database import Base, engine
 from routers import chat, statements, transactions
-from services.categoriser import INCOME_CATEGORIES, VALID_CATEGORIES
+from routers import rules as rules_router
+from services import rules
 
 DIST = (Path(__file__).parent.parent / "dist").resolve()
 
@@ -32,6 +33,7 @@ app.add_middleware(
 
 app.include_router(statements.router)
 app.include_router(transactions.router)
+app.include_router(rules_router.router)
 app.include_router(chat.router)
 
 
@@ -42,7 +44,7 @@ def health():
 
 @app.get("/categories")
 def categories():
-    return {"categories": VALID_CATEGORIES, "income_categories": list(INCOME_CATEGORIES)}
+    return {"categories": rules.categories(), "income_categories": rules.income_categories()}
 
 
 # Serve the built frontend from this same server, so the whole app runs on one port.

@@ -9,8 +9,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
+from services import rules
 from services import tools as tool_service
-from services.categoriser import INCOME_CATEGORIES
 
 load_dotenv()
 
@@ -18,21 +18,20 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 _client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-_income_list = " and ".join(INCOME_CATEGORIES) if INCOME_CATEGORIES else "none"
-_SYSTEM_BASE = (
-    "You are a personal finance assistant. The user is asking questions about their own "
-    "UK bank transactions. Use the available tools to query their transaction data and "
-    "answer accurately. Format all currency as £X.XX. If the data does not contain enough "
-    "information to answer, say so clearly. Do not invent transactions or amounts. "
-    f"{_income_list} are income categories (money coming in, positive amounts). "
-    "All other categories are spending (money going out, negative amounts). "
-    "When asked about income or earnings, use get_category_total with the relevant income category."
-)
-
 
 def _system_prompt() -> str:
-    today = date.today().isoformat()
-    return f"{_SYSTEM_BASE} Today's date is {today}."
+    income = rules.income_categories()
+    income_list = " and ".join(income) if income else "none"
+    return (
+        "You are a personal finance assistant. The user is asking questions about their own "
+        "UK bank transactions. Use the available tools to query their transaction data and "
+        "answer accurately. Format all currency as £X.XX. If the data does not contain enough "
+        "information to answer, say so clearly. Do not invent transactions or amounts. "
+        f"{income_list} are income categories (money coming in, positive amounts). "
+        "All other categories are spending (money going out, negative amounts). "
+        "When asked about income or earnings, use get_category_total with the relevant income "
+        f"category. Today's date is {date.today().isoformat()}."
+    )
 
 
 class Message(BaseModel):
@@ -61,7 +60,7 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)):
         response = _client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
-            tools=tool_service.DEFINITIONS,
+            tools=tool_service.definitions(),
             tool_choice="auto",
             temperature=0.2,
         )

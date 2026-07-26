@@ -14,6 +14,7 @@ dist-ssr
 
 # Backend
 backend/rules.json
+backend/rules.backup.json
 backend/venv/
 backend/__pycache__/
 backend/**/__pycache__/

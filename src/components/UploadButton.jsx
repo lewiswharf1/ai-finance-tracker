@@ -1,10 +1,12 @@
 import { useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import client from "@/api/client"
 
 export default function UploadButton({ onSuccess }) {
   const inputRef = useRef(null)
+  const navigate = useNavigate()
   const [uploading, setUploading] = useState(false)
 
   async function handleFile(e) {
@@ -21,6 +23,12 @@ export default function UploadButton({ onSuccess }) {
       })
       toast.success(`${data.imported} transactions imported`)
       onSuccess?.()
+
+      // Anything the rules did not match is waiting to be categorised by hand
+      if (data.uncategorised > 0) {
+        toast.info(`${data.uncategorised} need a category`)
+        navigate("/review")
+      }
     } catch (err) {
       const message = err.response?.data?.detail ?? "Upload failed"
       toast.error(message)

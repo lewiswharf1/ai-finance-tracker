@@ -1,15 +1,18 @@
+import copy
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import Transaction
-from services.categoriser import INCOME_CATEGORIES, VALID_CATEGORIES
+from services import rules
 
-_spending_cats = ", ".join(c for c in VALID_CATEGORIES if c not in INCOME_CATEGORIES)
-_income_cats = ", ".join(INCOME_CATEGORIES) if INCOME_CATEGORIES else "none"
-_category_description = (
-    f"Category name. Spending categories: {_spending_cats}. "
-    f"Income categories (money in): {_income_cats}."
-)
+
+def _category_description() -> str:
+    income = rules.income_categories()
+    return (
+        f"Category name. Spending categories: {', '.join(rules.spending_categories())}. "
+        f"Income categories (money in): {', '.join(income) if income else 'none'}."
+    )
 
 DEFINITIONS = [
     {
@@ -46,7 +49,7 @@ DEFINITIONS = [
                 "properties": {
                     "category": {
                         "type": "string",
-                        "description": _category_description,
+                        "description": "Category name.",  # filled in per request by definitions()
                     },
                     "year": {"type": "integer"},
                     "month": {"type": "integer"},
@@ -126,6 +129,20 @@ DEFINITIONS = [
 type Result = tuple[str, list[dict]]
 
 
+def definitions() -> list[dict]:
+    """Tool schemas for the chat model.
+
+    Built per request rather than at import so that categories added or renamed in
+    the rules editor are described accurately without restarting the server.
+    """
+    schemas = copy.deepcopy(DEFINITIONS)
+    for schema in schemas:
+        properties = schema["function"]["parameters"]["properties"]
+        if "category" in properties:
+            properties["category"]["description"] = _category_description()
+    return schemas
+
+
 def _base(db: Session):
     return db.query(Transaction).filter(
         Transaction.category != "Transfer",
@@ -172,7 +189,7 @@ def get_spending_summary(db: Session, year: int, month: int = None) -> Result:
 
 
 def get_category_total(db: Session, category: str, year: int = None, month: int = None) -> Result:
-    is_income = category in INCOME_CATEGORIES
+    is_income = category in rules.income_categories()
     amount_filter = Transaction.amount > 0 if is_income else Transaction.amount < 0
     q = db.query(Transaction).filter(Transaction.category == category, amount_filter)
     if year:
