@@ -19,30 +19,58 @@ function roundedTopRect(x, y, w, h, r) {
   )
 }
 
+/** The mirror, for a stack hanging below the zero line. */
+function roundedBottomRect(x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h))
+  if (!rr) return `M${x},${y} h${w} v${h} h${-w} Z`
+  return (
+    `M${x},${y} L${x + w},${y} L${x + w},${y + h - rr} ` +
+    `Q${x + w},${y + h} ${x + w - rr},${y + h} L${x + rr},${y + h} ` +
+    `Q${x},${y + h} ${x},${y + h - rr} Z`
+  )
+}
+
 /**
  * One segment of a stack.
  *
  * The 2px separator is a gap in the surface, not a stroke — every segment gives
- * up 2px off its top except the one on top, which keeps its full height and
- * takes the rounded cap. Total stack height is therefore still true to the data.
+ * up 2px on the side away from the baseline except the outermost one, which keeps
+ * its full height and takes the rounded cap. Stack height is still true to the data.
+ *
+ * A segment can be negative: a category whose refunds beat its purchases in that
+ * bucket hangs below zero. Bailing out on `height <= 0` used to drop those silently,
+ * so the chart totalled more than the headline it sat under.
  */
 function StackSegment({ x, y, width, height, fill, payload, seriesKey }) {
-  if (!height || height <= 0) return null
+  const value = payload?.[seriesKey] ?? 0
+  if (!value || !height) return null
 
-  const isTop = payload?.__top === seriesKey
-  const gap = isTop ? 0 : 2
-  const h = height - gap
+  // Recharts reports a below-zero segment as a negative height in some paths and as
+  // a positive one anchored at the zero line in others — normalise both.
+  const top = height < 0 ? y + height : y
+  const full = Math.abs(height)
+  const below = value < 0
+
+  const isEnd = below ? payload?.__bottom === seriesKey : payload?.__top === seriesKey
+  const gap = isEnd ? 0 : 2
+  const h = full - gap
   if (h <= 0) return null
 
-  return <path d={roundedTopRect(x, y + gap, width, h, isTop ? 4 : 0)} fill={fill} />
+  // The gap comes off the top going up, off the bottom going down
+  return below ? (
+    <path d={roundedBottomRect(x, top, width, h, isEnd ? 4 : 0)} fill={fill} />
+  ) : (
+    <path d={roundedTopRect(x, top + gap, width, h, isEnd ? 4 : 0)} fill={fill} />
+  )
 }
 
 function StackTooltip({ active, payload, label, colours }) {
   if (!active || !payload?.length) return null
 
+  // Biggest first by magnitude, so a refund is not stranded at the bottom of the list
   const entries = payload
-    .filter((p) => p.value > 0)
-    .sort((a, b) => b.value - a.value)
+    .filter((p) => p.value)
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
   if (!entries.length) return null
 
   const total = entries.reduce((sum, p) => sum + p.value, 0)
@@ -84,8 +112,11 @@ function toStackRows(buckets, data, bucketKey, series, labelFor) {
         row[d.category] = (row[d.category] ?? 0) + d.total
       }
     }
-    // Recharts stacks in element order, so the last series with a value is on top
-    row.__top = [...series].reverse().find((c) => row[c] > 0) ?? null
+    // Recharts stacks in element order, so the last series with a value is outermost.
+    // Positive and negative stacks grow in opposite directions and each need their own.
+    const outermost = [...series].reverse()
+    row.__top = outermost.find((c) => row[c] > 0) ?? null
+    row.__bottom = outermost.find((c) => row[c] < 0) ?? null
     return row
   })
 }
@@ -100,11 +131,17 @@ export default function SpendChart({
   height = 280,
 }) {
   const rows = toStackRows(buckets, data, bucketKey, series, labelFor)
+  // The two halves of a stack are measured separately: netting them first would
+  // understate the top of a bucket that holds both a spend and a refund.
   const tallest = Math.max(
     0,
-    ...rows.map((row) => series.reduce((sum, c) => sum + (row[c] ?? 0), 0))
+    ...rows.map((row) => series.reduce((sum, c) => sum + Math.max(row[c] ?? 0, 0), 0))
   )
-  const ticks = niceTicks(tallest)
+  const deepest = Math.min(
+    0,
+    ...rows.map((row) => series.reduce((sum, c) => sum + Math.min(row[c] ?? 0, 0), 0))
+  )
+  const ticks = niceTicks(tallest, { min: deepest })
 
   if (!rows.length || !series.length) {
     return (
@@ -120,7 +157,18 @@ export default function SpendChart({
   return (
     <div style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }} barCategoryGap="32%">
+        {/*
+          stackOffset="sign" is load-bearing: the default treats a stack as a running
+          total, so a negative segment is drawn from the top of the positive stack back
+          down over it rather than below zero. "sign" splits the stack at the baseline —
+          spending up, refunds down.
+        */}
+        <BarChart
+          data={rows}
+          margin={{ top: 8, right: 4, bottom: 0, left: 0 }}
+          barCategoryGap="32%"
+          stackOffset="sign"
+        >
           <CartesianGrid vertical={false} stroke={CHART.grid} />
           <XAxis
             dataKey="__label"
@@ -134,7 +182,7 @@ export default function SpendChart({
             axisLine={false}
             tickFormatter={gbpAxis}
             ticks={ticks}
-            domain={[0, ticks[ticks.length - 1]]}
+            domain={[ticks[0], ticks[ticks.length - 1]]}
             width={56}
           />
           <Tooltip

@@ -56,6 +56,20 @@ Current set (user-defined, will change): `One off` · `Rent` · `Groceries` · `
 - **Unfiled rows are not spending.** `_spending_query` excludes empty categories entirely
   rather than grouping them under a blank name; `/transactions/summary` reports their
   total as `uncategorised_spend` so the UI can say what the headline leaves out
+- **`backend/services/queries.py` is the only definition of "spending" and "income".**
+  The dashboard and the chat tools both build their filters from it. They used to hold
+  separate copies that had drifted, so chat and the dashboard could quote different
+  totals for the same month
+- **Refunds net off their category — they are never dropped.** A `Transaction.amount < 0`
+  filter looks like "money out" but silently deletes refunds from every total while the
+  transactions table still lists them, which put June £48.05 above the bank statement.
+  Totals sum the *signed* amount. A category can therefore net negative in a month, and
+  that is a true statement about the money — do not clamp it to zero
+- **A negative total must survive all the way to the pixel.** `gbp()` never drops a minus
+  (pass an absolute value when an arrow or label already carries the direction), and
+  `SpendChart` needs `stackOffset="sign"` — Recharts' default treats a stack as a running
+  total and draws a negative segment back down over the positive ones instead of below
+  the baseline. `niceTicks(max, { min })` takes the floor so the axis makes room
 - **Chat** uses GPT-4o tool calling over the SQL query functions in `backend/services/tools.py` — there is no vector store or RAG; `search_transactions` is a substring match on merchant
 - **Backend docs** available at `localhost:8000/docs`
 - `OPENAI_API_KEY` lives in `backend/.env` — never commit this file

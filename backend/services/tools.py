@@ -4,7 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import Transaction
-from services import rules
+from services import queries, rules
 
 
 def _category_description() -> str:
@@ -144,10 +144,12 @@ def definitions() -> list[dict]:
 
 
 def _base(db: Session):
-    return db.query(Transaction).filter(
-        Transaction.category != rules.EXCLUDED,
-        Transaction.amount < 0,
-    )
+    """Same definition of spending the dashboard uses — see services/queries.py.
+
+    This used a bare `!=` on a nullable column and an `amount < 0` filter, so chat
+    could quote a different total from the dashboard for the same month.
+    """
+    return db.query(Transaction).filter(*queries.spending_filters())
 
 
 def _tx_dict(tx: Transaction) -> dict:
@@ -166,7 +168,7 @@ def get_spending_summary(db: Session, year: int, month: int = None) -> Result:
             Transaction.category,
             func.round(func.sum(-Transaction.amount), 2).label("total"),
         )
-        .filter(Transaction.category != rules.EXCLUDED, Transaction.amount < 0)
+        .filter(*queries.spending_filters())
         .filter(Transaction.year == year)
     )
     if month:
@@ -190,8 +192,9 @@ def get_spending_summary(db: Session, year: int, month: int = None) -> Result:
 
 def get_category_total(db: Session, category: str, year: int = None, month: int = None) -> Result:
     is_income = category in rules.income_categories()
-    amount_filter = Transaction.amount > 0 if is_income else Transaction.amount < 0
-    q = db.query(Transaction).filter(Transaction.category == category, amount_filter)
+    # No sign filter: the signed sum below nets a refund off its category rather than
+    # dropping it, which is what the dashboard reports.
+    q = db.query(Transaction).filter(Transaction.category == category)
     if year:
         q = q.filter(Transaction.year == year)
     if month:
@@ -218,7 +221,7 @@ def get_top_merchants(db: Session, year: int = None, month: int = None, limit: i
             func.round(func.sum(-Transaction.amount), 2).label("total"),
             func.count(Transaction.id).label("count"),
         )
-        .filter(Transaction.category != rules.EXCLUDED, Transaction.amount < 0)
+        .filter(*queries.spending_filters())
     )
     if year:
         q = q.filter(Transaction.year == year)
@@ -263,7 +266,9 @@ def search_transactions(db: Session, query: str, year: int = None, month: int = 
     q = (
         db.query(Transaction)
         .filter(
-            Transaction.category != rules.EXCLUDED,
+            # coalesce, not a bare !=: NULL != 'Excluded' is NULL, which hid every
+            # row still awaiting review from search.
+            queries.category_name() != rules.EXCLUDED,
             Transaction.merchant.ilike(f"%{query}%"),
         )
     )

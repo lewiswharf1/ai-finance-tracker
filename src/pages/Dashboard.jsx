@@ -113,7 +113,8 @@ function Verdict({ summary, year, month, loading }) {
                 <p
                   className={`mt-1 text-lg font-medium tabular-nums ${down ? "text-emerald-600" : "text-foreground"}`}
                 >
-                  {down ? "↓" : "↑"} {gbp(delta)}
+                  {/* Absolute: the arrow already says which way */}
+                  {down ? "↓" : "↑"} {gbp(Math.abs(delta))}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {share}% {down ? "less" : "more"}

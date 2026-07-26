@@ -8,44 +8,19 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Transaction
-from services import rules
+from services import queries, rules
 from services.categoriser import categorise_all, uncategorised_query
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
 def _spending_query(db: Session, *columns):
-    """Filed, non-excluded money out.
-
-    Everything here goes through coalesce because `category` is nullable and SQL's
-    NULL comparisons are NULL, not true — a bare `!=` silently dropped unfiled rows
-    stored as NULL while counting the ones stored as "", so identical unfiled
-    transactions landed on opposite sides of the same filter.
-
-    Unfiled rows are excluded outright rather than grouped under a blank name: they
-    are not a category, and a nameless bar in the breakdown is unreadable. Their
-    total is reported separately by /summary so the review prompt can name it.
-    """
-    category = func.coalesce(Transaction.category, "")
-    return (
-        db.query(*columns)
-        .filter(
-            category != "",
-            category != rules.EXCLUDED,
-            category.notin_(rules.income_categories()),
-            Transaction.amount < 0,
-        )
-    )
+    """Filed, non-excluded spending, with refunds netted off. See services/queries.py."""
+    return db.query(*columns).filter(*queries.spending_filters())
 
 
 def _income_query(db: Session, *columns):
-    return (
-        db.query(*columns)
-        .filter(
-            Transaction.category.in_(rules.income_categories()),
-            Transaction.amount > 0,
-        )
-    )
+    return db.query(*columns).filter(*queries.income_filters())
 
 
 def _tx_dict(tx: Transaction) -> dict:
@@ -204,10 +179,9 @@ def month_summary(year: int, month: int, db: Session = Depends(get_db)):
     pending = uncategorised_query(db).filter(Transaction.year == year, Transaction.month == month)
 
     # Money out that no category claims yet. Kept out of `spent` — see _spending_query —
-    # so the prompt to review can say how much is still unaccounted for.
-    pending_out = (
-        pending.with_entities(func.sum(-Transaction.amount)).filter(Transaction.amount < 0).scalar()
-    )
+    # so the prompt to review can say how much is still unaccounted for. Netted like
+    # every other total, so an unfiled refund reduces it instead of vanishing.
+    pending_out = pending.with_entities(func.sum(-Transaction.amount)).scalar()
 
     return {
         "year": year,
@@ -267,7 +241,7 @@ def transaction_list(
     else:
         # coalesce, not a bare !=: category is nullable, and SQL's NULL != 'Excluded'
         # is NULL, which would quietly drop every row still awaiting review.
-        q = db.query(Transaction).filter(func.coalesce(Transaction.category, "") != rules.EXCLUDED)
+        q = db.query(Transaction).filter(queries.category_name() != rules.EXCLUDED)
 
     if merchant:
         q = q.filter(Transaction.merchant.ilike(f"%{merchant}%"))

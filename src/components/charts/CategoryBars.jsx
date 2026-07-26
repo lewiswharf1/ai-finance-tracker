@@ -15,7 +15,12 @@ export default function CategoryBars({ categories, colours, total }) {
     )
   }
 
-  const largest = Math.max(...categories.map((c) => c.total))
+  // Magnitude, not value: a category whose refunds beat its purchases nets below
+  // zero, and scaling that against a positive max gave every credit the same 1.5%
+  // stub — indistinguishable from a genuinely tiny spend. A credit keeps its own
+  // ramp colour, because a category must not change colour between views, and shows
+  // its direction as a hollow bar. The chart says the same thing with position.
+  const largest = Math.max(...categories.map((c) => Math.abs(c.total)))
 
   return (
     <ul className="space-y-2.5">
@@ -33,8 +38,10 @@ export default function CategoryBars({ categories, colours, total }) {
             <div
               className="h-full rounded-[2px]"
               style={{
-                width: `${Math.max((amount / largest) * 100, 1.5)}%`,
-                background: colours[category],
+                width: `${largest > 0 ? Math.max((Math.abs(amount) / largest) * 100, 1.5) : 0}%`,
+                background: amount < 0 ? "transparent" : colours[category],
+                // Inset, so the outline costs the bar no width
+                boxShadow: amount < 0 ? `inset 0 0 0 1.5px ${colours[category]}` : undefined,
               }}
             />
           </div>
